@@ -13,6 +13,7 @@
 #include <string.h>
 #include <math.h>
 #include <assert.h>
+#include <ctype.h>
 //feel free to add here any additional library names you may need 
 #define SINGLE 1
 #define BATCH 0
@@ -168,12 +169,86 @@ char *progScanner(char *line){
 	return newLine;
 }
 
-char *regNumberConverter(char *ptr){
-	char *newLine = NULL;
-	//printf("Line input inside regNumberConverter: %s", ptr);
+char *regNumberConverter(char *instruction){
+    char registers1[32][5]={"zero", "at", "v0", "v1", "a0", "a1", "a2", "a3", "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7","s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7","t8", "t9", "k0", "k1", "gp", "sp", "fp", "ra"};
+	char* newLine;
+    int length = strlen(instruction);
+    int j = 0;
+    char* temp;
+    char* regNumber;
+    newLine = (char*)malloc(length);
+    int g=0;
+    for (int i = 0; i<length;i++)
+    {
+        //find the delimeter
+        if(instruction[i]=='$')
+        {
+            j=i;
+            //find the end
+           while((instruction[j]!=' ')&&(j<length))
+           {
+               j++;
+           }
 
-	//Do some stuff here to correct the input and then send back a pointer to new string
-	newLine = ptr;
+           //copy the register into a temp var
+           temp = (char*)malloc(j-(i));
+           regNumber = (char*)malloc(j-(i));
+           int h = 0;
+           int x =0;
+           for(int k = i+1;k<j;k++)
+           {
+               if(isdigit(instruction[k]))
+                  {
+                    regNumber[h]= instruction[k];
+                    h++;
+                  }
+                    temp[x]= instruction[k];
+                    x++;
+
+           }
+           regNumber[h] = '\0';
+           temp[x] = '\0';
+            //if register value is not already a number, make it one
+            if(strcmp(temp,regNumber))
+            {
+                for(int q=0; q<32;q++)
+                {
+                    if(!strcmp(registers1[q],temp))
+                    {
+                    itoa(q, regNumber, 10);
+                    break;
+                    }
+                itoa(-1, regNumber, 10);
+                }
+
+            }
+            //replace the instruction with the new register value
+            int length2 = strlen(regNumber);
+
+            for(int z = 0; z<length2;z++)
+            {
+                newLine[g]=regNumber[z];
+                g++;
+            }
+            i=i+x;
+
+
+
+        //printf(regNumber);
+        //check if the register value is not out of bounds
+        assert(atoi(regNumber) < 32);
+        assert(atoi(regNumber) != -1);
+
+    }
+      //reconstruct the instruction
+    else
+    {
+        newLine[g]=instruction[i];
+        g++;
+    }
+    }
+    newLine[g]='\0';
+
 	return newLine;
 }
 
