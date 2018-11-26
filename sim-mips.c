@@ -1,4 +1,5 @@
 /* Name: Samuel Burgess
+ *  /* Name: Samuel Burgess
  *       Justin Forgue
  *       Aric Pennington
  *       Elias Phillips
@@ -8,26 +9,38 @@
  * Project: Pipelined Machine
  */
 
-//For visual studio
-#define _CRT_SECURE_NO_WARNINGS
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <assert.h>
 #include <ctype.h>
-//feel free to add here any additional library names you may need
 #define SINGLE 1
 #define BATCH 0
 #define REG_NUM 32
-//we could definitely have less globals
+
+
+/* Prototype functions */
+int str_len(char str[]);
+int compare(char *str1, char *str2);
+char * my_strcpy(char *strDest, const char *strSrc);
+char * my_strcat(char *dest, const char *src);
+char *progScanner(char *line);
+char *regNumberConverter(char *instruction);
+struct inst parser(char *ptr);
+void IF(struct inst temp);
+void ID();
+void EX();
+void Mem();
+void WB();
+
+/* Global Variables */
 int c, m, n;
 int branchPending = 0;
 enum opcode { ADD, ADDI, SUB, MULT, BEQ, LW, SW, haltSim };
 long mips_reg[REG_NUM];
 long dataMem[512];
-long pgm_c = 0;//program counter
+long pgm_c = 0; //Program counter
 int halt = 0;
 int IFcyc = 0;
 int IDcyc = 0;
@@ -51,18 +64,152 @@ struct latch
 	long data;
 };
 
-//this is how we pass data between stages
+/* This is how we pass data between stages */
 struct latch IFID;
 struct latch IDEX;
 struct latch EXMEM;
 struct latch MEMWB;
 
+/*
+ * Function: main
+ * -------------------
+ *  Sets up the arguments and opens the file to be read. Calls all of the
+ *  main functions in the pipeline
+ */
+main(int argc, char *argv[]) {
+	double ifUtil;
+	double idUtil;
+	double exUtil;
+	double memUtil;
+	double wbUtil;
+
+	int sim_mode = 0;   //Mode flag, 1 for single-cycle, 0 for batch
+
+	int i = 0;          //For loop counter
+
+	long sim_cycle = 1; //Simulation cycle counter
+
+	int test_counter = 0;
+	FILE *input = NULL;
+	FILE *output = NULL;
+	printf("The arguments are:");
+
+	for (i = 1;i < argc;i++) {
+		printf("%s ", argv[i]);
+	}
+	printf("\n");
+	if (argc == 7) {
+		if (compare("-s", argv[1]) == 0) {
+			sim_mode = SINGLE;
+		}
+		else if (compare("-b", argv[1]) == 0) {
+			sim_mode = 0;
+		}
+		else {
+			printf("Wrong sim mode chosen\n");
+			exit(0);
+		}
+
+		m = atoi(argv[2]);
+		n = atoi(argv[3]);
+		c = atoi(argv[4]);
+		input = fopen(argv[5], "r");
+		output = fopen(argv[6], "w");
+
+	}
+
+	else {
+		printf("Usage: ./sim-mips -s m n c input_name output_name (single-sysle mode)\n or \n ./sim-mips -b m n c input_name  output_name(batch mode)\n");
+		printf("m,n,c stand for number of cycles needed by multiplication, other operation, and memory access, respectively\n");
+		exit(0);
+	}
+	if (input == NULL) {
+		printf("Unable to open input or output file\n");
+		exit(0);
+	}
+	if (output == NULL) {
+		printf("Cannot create output file\n");
+		exit(0);
+	}
+
+	//Initialize registers and program counter
+	for (i = 0;i < REG_NUM;i++) {
+		mips_reg[i] = 0;
+	}
+
+	pgm_c = 0;
+	char *linePtr = NULL;
+	char *correctedLinePtr = NULL;
+	char *secondCorrectedLinePtr = NULL;
+
+
+	linePtr = (char*)malloc(100);
+	correctedLinePtr = (char*)malloc(100);
+	secondCorrectedLinePtr = (char*)malloc(100);
+	int t = 0;
+
+
+	struct inst IM[512];
+
+	while (fgets(linePtr, 100, input)){
+		correctedLinePtr = progScanner(linePtr);
+		secondCorrectedLinePtr = regNumberConverter(correctedLinePtr);
+		IM[t] = parser(secondCorrectedLinePtr);
+		t++;
+	}
+
+	while (!halt) {
+		WB();
+		wbUtil = (double)WBcyc / (double)sim_cycle;
+		Mem();
+		memUtil = (double)MEMcyc / (double)sim_cycle;
+		EX();
+		exUtil = (double)EXcyc / (double)sim_cycle;
+		ID();
+		idUtil = (double)IDcyc / (double)sim_cycle;
+		IF(IM[pgm_c]);
+		ifUtil = (double)IFcyc / (double)sim_cycle;
+
+		/*  Output code 2: the following code will output the register
+         *  value to screen at every cycle and wait for the ENTER key
+         *  to be pressed; this will make it proceed to the next cycle
+         */
+		if (sim_mode == 1) {
+			printf("cycle: %d register value: ", sim_cycle);
+			for (i = 1;i < REG_NUM;i++) {
+				printf("%d  ", mips_reg[i]);
+			}
+			printf("program counter: %d\n", pgm_c*4);
+			printf("press ENTER to continue\n");
+			while (getchar() != '\n');
+
+		}
+		sim_cycle++;    //Increase cycle count each time
+
+	}
+
+	if (sim_mode == 0) {
+		fprintf(output, "program name: %s\n", argv[5]);
+		fprintf(output, "stage utilization: %f  %f  %f  %f  %f \n", ifUtil, idUtil, exUtil, memUtil, wbUtil);
+		// Add the (double) stage_counter/sim_cycle for each
+		// Stage following sequence IF ID EX MEM WB
+		fprintf(output, "register values ");
+		for (i = 1;i < REG_NUM;i++) {
+			fprintf(output, "%d  ", mips_reg[i]);
+		}
+		fprintf(output, "%d\n", pgm_c*4);
+
+	}
+	//Close input and output files at the end of the simulation
+	fclose(input);
+	fclose(output);
+	return 0;
+}
 
 /*
  * Function: str_len
  * -------------------
  *  Finds the length of the string
- *
  *  returns: The length of the string
  */
 int str_len(char str[]) {
@@ -77,7 +224,6 @@ int str_len(char str[]) {
  * Function: compare
  * -------------------
  *  Compare two strings to see if they are equal or not
- *
  *  returns: return 0 if they are equal otherwise non-zero
  */
 int compare(char *str1, char *str2) {
@@ -93,14 +239,12 @@ int compare(char *str1, char *str2) {
  * Function: my_strcpy
  * -------------------
  *  Copy a string
- *
  *  returns: The copied string
  */
-char * my_strcpy(char *strDest, const char *strSrc)
-{
+char * my_strcpy(char *strDest, const char *strSrc){
 	assert(strDest != NULL && strSrc != NULL);
 	char *temp = strDest;
-	while (*strDest++ = *strSrc++); // or while((*strDest++=*strSrc++) != '\0');
+	while (*strDest++ = *strSrc++);
 	return temp;
 }
 
@@ -108,11 +252,9 @@ char * my_strcpy(char *strDest, const char *strSrc)
  * Function: my_strcat
  * -------------------
  *  Appends a copy of the string to another string
- *
  *  returns: string
  */
-char * my_strcat(char *dest, const char *src)
-{
+char * my_strcat(char *dest, const char *src){
 	char *rdest = dest;
 
 	while (*dest)
@@ -123,40 +265,12 @@ char * my_strcat(char *dest, const char *src)
 }
 
 /*
- * Function: IF
- * -------------------
- *  Fetches the instruction. Also waits for the stage to be free
- *  before allowing another instruction into the IF stage
- *
- *  returns: nothing
- */
-void IF(struct inst temp)
-{
-	static int IFstall;
-	IFstall = 1;
-	if (!IFID.full && !branchPending)
-	{
-		if (IFstall < c)
-		{
-			IFstall++;
-		}
-		else
-		{
-			IFstall = 1;
-			IFID.instruction = temp;
-			IFID.full = 1;
-			pgm_c++;
-			IFcyc += c;
-		}
-	}
-}
-
-/*
  * Function: progScanner
  * -------------------
- *
- *
- *
+ *  Takes in each line and breaks it into segments
+ *  with strtok at spaces, commas, and parentheses
+ *  reassembles with only spaces between words
+ *  Stops program if unmatched parentheses are found
  *  returns: Pointer to a character
  */
 char *progScanner(char *line) {
@@ -204,20 +318,12 @@ char *progScanner(char *line) {
 /*
  * Function: regNumberConverter
  * -------------------
- *
- *
- *
+ *  Converts register names to numbers
  *  returns: Pointer to a character
  */
 char *regNumberConverter(char *instruction) {
 	char *registers1[16] = { "zero", "at", "v0", "v1", "a0", "a1", "a2", "a3", "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7"};
 	char *registers2[16] = {"s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7","t8", "t9", "k0", "k1", "gp", "sp", "fp", "ra" };
-	//const char **registers1;
-	//char sam[32][5]={{'z','e','r','o'},{'a','t'},{'v','0'},{'v','1'},{'a','0'},{'a','1'},{'a','2'},{'a','3'},{'t','0'},{'t','1'},{'t','2'},{'t','3'},{'t','4'},{'t','5'},{'t','6'},{'t','7'},{'s','0'},{'s','1'},{'s','2'},{'s','3'},{'s','4'},{'s','5'},{'s','6'},{'s','7'},{'t','8'},{'t','9'},{'k','0'},{'k','1'},{'g','p'},{'s','p'},{'f','p'},{'r','a'}};
-	//int p=0;
-	//for (p = 0; p < 32; p++)
-	//  (registers1 + p) = (char *)malloc(5 * sizeof(char *));
-
 	char* newLine;
 	int length = strlen(instruction);
 	int j = 0;
@@ -228,17 +334,17 @@ char *regNumberConverter(char *instruction) {
 	int i = 0;
 	for (i = 0; i < length;i++)
 	{
-		//find the delimeter
+		//Find the delimeter
 		if (instruction[i] == '$')
 		{
 			j = i;
-			//find the end
+			//Find the end
 			while ((instruction[j] != ' ') && (j < length - 1))
 			{
 				j++;
 			}
 
-			//copy the register into a temp var
+			//Copy the register into a temp var
 			temp = (char*)malloc(j - (i));
 			regNumber = (char*)malloc(j - (i));
 			int h = 0;
@@ -257,7 +363,7 @@ char *regNumberConverter(char *instruction) {
 			}
 			regNumber[h] = '\0';
 			temp[x] = '\0';
-			//if register value is not already a number, make it one
+			//If register value is not already a number, make it one
 			if (compare(temp, regNumber))
 			{
 				int q = 0;
@@ -265,36 +371,20 @@ char *regNumberConverter(char *instruction) {
 				{
 					if (!compare(registers1[q], temp))
 					{
-						//itoa(q, regNumber, 10);
-						//regNumber = (int)(q+'0');
-						//printf("itoa %s", regNumber);
-						//sprintf(*regNumber,"%d", q);
 						snprintf(regNumber, sizeof(regNumber), "%d", q);
 						break;
 					}
 
 					if (!compare(registers2[q], temp))
 					{
-						//itoa(q, regNumber, 10);
-						//regNumber = (int)(q+'0');
-						//printf("itoa %s", regNumber);
-						//sprintf(*regNumber,"%d", q);
 						snprintf(regNumber, sizeof(regNumber), "%d", q+16);
 						break;
 					}
-
-					//regNumber = (char)(-1 +'0');
-					//printf("itoa %s", regNumber);
-					//itoa(-1, regNumber, 10);
 					snprintf(regNumber, sizeof(regNumber), "%d", -1);
-					//sprintf(*regNumber,"%d", -1);
-
 				}
-
 			}
-			//replace the instruction with the new register value
+			//Replace the instruction with the new register value
 			int length2 = strlen(regNumber);
-			//printf("length%d", length2);
 			int z = 0;
 			for (z = 0; z < length2;z++)
 			{
@@ -302,16 +392,13 @@ char *regNumberConverter(char *instruction) {
 				g++;
 			}
 			i = i + x;
-
-
-
 			printf("\nRegnumber is: %s",regNumber);
-			//check if the register value is not out of bounds
+			//Check if the register value is not out of bounds
 			assert(atoi(regNumber) < 32);
 			assert(atoi(regNumber) != -1);
 
 		}
-			//reconstruct the instruction
+			//Reconstruct the instruction
 		else
 		{
 			newLine[g] = instruction[i];
@@ -325,33 +412,20 @@ char *regNumberConverter(char *instruction) {
 /*
  * Function: parser
  * -------------------
- *
- *
- *
- *  returns: a instruction structure
+ *  Requires input like: add 3 4 5
+ *  Uses output from regNumberConverter
+ *  instruction as an inst struct
+ *  test code to make sure ptr is received
  */
 struct inst parser(char *ptr) {
-	//Requires input like: add 3 4 5
-
-	//Uses output from regNumberConverter
-	//instruction as an inst struct
-	//test code to make sure ptr is received
-	//printf("Line input inside parser: %s", ptr);
-
 	struct inst temp;
 	temp.op = 0;
 	temp.reg1 = 0;
 	temp.reg2 = 0;
 	temp.reg3 = 0;
 	temp.imm = 0;
-	//int val1;
-	//int val2;
-	//int val3;
-	//char *str = NULL;
-	//str = malloc(100 * sizeof(char));
-	//str = "sub";
 
-	//modified code from class website
+	//Modified code from class website
 	int i = 0;
 	char delimiters[] = " ";
 	char ** instructionFields;
@@ -365,17 +439,9 @@ struct inst parser(char *ptr) {
 	instructionFields[2] = strtok(NULL, delimiters);
 	instructionFields[3] = strtok(NULL, delimiters);
 
-	//printf("inputString[]=%s\n", ptr);
-	//printf("\n\nThe instruction line is: %s %s %s %s", instructionFields[0], instructionFields[1],
-	//instructionFields[2], instructionFields[3]);
-
-	//printf("The string is: %s", *str);
-	//printf("opcode %s", opcode);
-	//cant use switch case statements in c for strings, awesome...
+	//Can't use switch case statements in c for strings, awesome...
 
 	if (compare(instructionFields[0], "add") == 0) {
-		//format add rd = rs + rt
-		//printf("ADD");
 		temp.op = ADD;
 		temp.reg1 = atoi(instructionFields[1]);
 		temp.reg2 = atoi(instructionFields[2]);
@@ -384,11 +450,9 @@ struct inst parser(char *ptr) {
 
 	}
 	else if (compare(instructionFields[0], "addi") == 0) {
-		//format addi rt = rs + imm
-		//printf("ADDI");
 		if (atoi(instructionFields[3]) > 65535) {
 			printf("Immediate field contains a number that is too large,");
-			temp.imm = -1; //return -1 in the imm field to indicate and error for program to stop
+			temp.imm = -1;  //Return -1 in the imm field to indicate and error for program to stop
 			return temp;
 		}
 
@@ -399,8 +463,6 @@ struct inst parser(char *ptr) {
 		assert(temp.reg1 != 0);
 	}
 	else if (compare(instructionFields[0], "sub") == 0) {
-		//printf("SUB");
-		//format sub rd = rs - rt
 		temp.op = SUB;
 		temp.reg1 = atoi(instructionFields[1]);
 		temp.reg2 = atoi(instructionFields[2]);
@@ -408,8 +470,6 @@ struct inst parser(char *ptr) {
 		assert(temp.reg1 != 0);
 	}
 	else if (compare(instructionFields[0], "mul") == 0) {
-		//format mult rd = rs * rt
-		//printf("MULT");
 		temp.op = MULT;
 		temp.reg1 = atoi(instructionFields[1]);
 		temp.reg2 = atoi(instructionFields[2]);
@@ -417,10 +477,7 @@ struct inst parser(char *ptr) {
 		assert(temp.reg1 != 0);
 
 	}
-	else if (compare(instructionFields[0], "beq") == 0) {
-		//if rs = rt goto imm
-		//format beq rs rt imm
-		//printf("BEQ");
+	else if (compare(instructionFields[0], "beq") == 0) {;
 		if (atoi(instructionFields[3]) > 65535) {
 			printf("Immediate field contains a number that is too large,");
 			temp.imm = -1; //return -1 in the imm field to indicate and error for program to stop
@@ -432,10 +489,7 @@ struct inst parser(char *ptr) {
 		temp.reg2 = atoi(instructionFields[2]);
 		temp.imm = atoi(instructionFields[3]);
 	}
-	else if (compare(instructionFields[0], "sw") == 0) {
-		//store rt into rs + imm
-		//format sw rt imm rs
-		//printf("SW");
+	else if (compare(instructionFields[0], "sw") == 0) {;
 		temp.op = SW;
 		temp.reg1 = atoi(instructionFields[1]);
 		temp.reg2 = atoi(instructionFields[3]);
@@ -444,9 +498,6 @@ struct inst parser(char *ptr) {
 		temp.imm = temp.imm / 4;
 	}
 	else if (compare(instructionFields[0], "lw") == 0) {
-		//load from rs + imm to rt
-		//format lw rt imm rs
-		//printf("LW");
 		temp.op = LW;
 		temp.reg1 = atoi(instructionFields[1]);
 		temp.reg2 = atoi(instructionFields[3]);
@@ -462,22 +513,44 @@ struct inst parser(char *ptr) {
 	else {
 		printf("\nIllegal opcode: %s", instructionFields[0]);
 	}
-
-	//instMemory[instCounter] = temp;
-
 	return temp;
+}
+
+/*
+ * Function: IF
+ * -------------------
+ *  Fetches the instruction. Also waits for the stage to be free
+ *  before allowing another instruction into the IF stage
+ *  returns: nothing
+ */
+void IF(struct inst temp){
+	static int IFstall;
+	IFstall = 1;
+	if (!IFID.full && !branchPending)
+	{
+		if (IFstall < c)
+		{
+			IFstall++;
+		}
+		else
+		{
+			IFstall = 1;
+			IFID.instruction = temp;
+			IFID.full = 1;
+			pgm_c++;
+			IFcyc += c;
+		}
+	}
 }
 
 /*
  * Function: ID
  * -------------------
- *
- *
- *
+ *  Decodes the instruction and
+ *  checks for data and control hazards
  *  returns: nothing
  */
-void ID()
-{
+void ID(){
 	int dataHazard;
 	dataHazard = 0;
 	if (!IDEX.full&&IFID.full)
@@ -588,13 +661,10 @@ void ID()
 /*
  * Function: EX
  * -------------------
- *
- *
- *
+ *  Executes the intruction
  *  returns: nothing
  */
-void EX()
-{
+void EX(){
 	static int stall = 1;
 	if (!EXMEM.full&&IDEX.full)
 	{
@@ -738,13 +808,10 @@ void EX()
 /*
  * Function: Mem
  * -------------------
- *
- *
- *
+ *  Read or writes from memory for lw and sw
  *  returns: nothing
  */
-void Mem()
-{
+void Mem(){
 	static int memstall = 1;
 	if (EXMEM.full && !MEMWB.full)
 	{
@@ -804,13 +871,10 @@ void Mem()
 /*
  * Function: WB
  * -------------------
- *
- *
- *
+ *  Updates the register contents
  *  returns: nothing
  */
-void WB()
-{
+void WB(){
 	if (MEMWB.full)
 	{
 		if (MEMWB.instruction.op == ADD || MEMWB.instruction.op == SUB || MEMWB.instruction.op == ADDI || MEMWB.instruction.op == MULT || MEMWB.instruction.op == LW)
@@ -824,163 +888,4 @@ void WB()
 		MEMWB.full = 0;
 	}
 
-}
-
-/*
- * Function: main
- * -------------------
- *  Sets up the arguments and opens the file to be read. Calls all of the
- *  main functions in the pipeline.
- *
- *
- */
-main(int argc, char *argv[]) {
-	double ifUtil;
-	double idUtil;
-	double exUtil;
-	double memUtil;
-	double wbUtil;
-
-	int sim_mode = 0;//mode flag, 1 for single-cycle, 0 for batch
-
-	int i = 0;//for loop counter
-
-	long sim_cycle = 1;
-	//simulation cycle counter
-	//define your own counter for the usage of each pipeline stage here
-
-	int test_counter = 0;
-	FILE *input = NULL;
-	FILE *output = NULL;
-	printf("The arguments are:");
-
-	for (i = 1;i < argc;i++) {
-		printf("%s ", argv[i]);
-	}
-	printf("\n");
-	if (argc == 7) {
-		if (compare("-s", argv[1]) == 0) {
-			sim_mode = SINGLE;
-		}
-		else if (compare("-b", argv[1]) == 0) {
-			sim_mode = 0;
-		}
-		else {
-			printf("Wrong sim mode chosen\n");
-			exit(0);
-		}
-
-		m = atoi(argv[2]);
-		n = atoi(argv[3]);
-		c = atoi(argv[4]);
-		input = fopen(argv[5], "r");
-		output = fopen(argv[6], "w");
-
-	}
-
-	else {
-		printf("Usage: ./sim-mips -s m n c input_name output_name (single-sysle mode)\n or \n ./sim-mips -b m n c input_name  output_name(batch mode)\n");
-		printf("m,n,c stand for number of cycles needed by multiplication, other operation, and memory access, respectively\n");
-		exit(0);
-	}
-	if (input == NULL) {
-		printf("Unable to open input or output file\n");
-		exit(0);
-	}
-	if (output == NULL) {
-		printf("Cannot create output file\n");
-		exit(0);
-	}
-
-	//initialize registers and program counter
-	for (i = 0;i < REG_NUM;i++) {
-		mips_reg[i] = 0;
-	}
-
-	//start your code from here
-	pgm_c = 0;
-	char *linePtr = NULL;
-	char *correctedLinePtr = NULL;
-	char *secondCorrectedLinePtr = NULL;
-
-
-	linePtr = (char*)malloc(100);
-	correctedLinePtr = (char*)malloc(100);
-	secondCorrectedLinePtr = (char*)malloc(100);
-	int t = 0;
-
-
-	struct inst IM[512];
-
-	while (fgets(linePtr, 100, input))
-	{
-		correctedLinePtr = progScanner(linePtr);
-		//printf("correctedLineptr %s", correctedLinePtr);
-		secondCorrectedLinePtr = regNumberConverter(correctedLinePtr);
-		//printf("secondLineptr %s", secondCorrectedLinePtr);
-		IM[t] = parser(secondCorrectedLinePtr);
-		t++;
-	}
-
-	while (!halt) {
-		WB();
-		wbUtil = (double)WBcyc / (double)sim_cycle;
-		Mem();
-		memUtil = (double)MEMcyc / (double)sim_cycle;
-		EX();
-		exUtil = (double)EXcyc / (double)sim_cycle;
-		ID();
-		idUtil = (double)IDcyc / (double)sim_cycle;
-		IF(IM[pgm_c]);
-		ifUtil = (double)IFcyc / (double)sim_cycle;
-
-		//output code 2: the following code will output the register
-		//value to screen at every cycle and wait for the ENTER key
-		//to be pressed; this will make it proceed to the next cycle
-		if (sim_mode == 1) {
-			printf("cycle: %d register value: ", sim_cycle);
-			for (i = 1;i < REG_NUM;i++) {
-				printf("%d  ", mips_reg[i]);
-			}
-			printf("program counter: %d\n", pgm_c*4);
-			printf("press ENTER to continue\n");
-			while (getchar() != '\n');
-
-		}
-		//increase cycle count each time
-		sim_cycle++;
-
-	}
-	//add the following code to the end of the simulation,
-	//to output statistics in batch mode
-	if (sim_mode == 0) {
-		fprintf(output, "program name: %s\n", argv[5]);
-		fprintf(output, "stage utilization: %f  %f  %f  %f  %f \n", ifUtil, idUtil, exUtil, memUtil, wbUtil);
-		// add the (double) stage_counter/sim_cycle for each
-		// stage following sequence IF ID EX MEM WB
-
-		fprintf(output, "register values ");
-		for (i = 1;i < REG_NUM;i++) {
-			fprintf(output, "%d  ", mips_reg[i]);
-		}
-		fprintf(output, "%d\n", pgm_c*4);
-
-	}
-	//close input and output files at the end of the simulation
-	fclose(input);
-	fclose(output);
-	return 0;
-}	// stage following sequence IF ID EX MEM WB
-
-		fprintf(output,"register values ");
-		for (i=1;i<REG_NUM;i++){
-			fprintf(output,"%d  ",mips_reg[i]);
-		}
-		fprintf(output,"%d\n",pgm_c);
-
-	}
-	//close input and output files at the end of the simulation
-	fclose(input);
-	fclose(output);
-	return 0;
 }
