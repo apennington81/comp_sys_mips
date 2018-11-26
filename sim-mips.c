@@ -391,7 +391,6 @@ char *regNumberConverter(char *instruction) {
 				g++;
 			}
 			i = i + x;
-			printf("\nRegnumber is: %s",regNumber);
 			//Check if the register value is not out of bounds
 			assert(atoi(regNumber) < 32);
 			assert(atoi(regNumber) != -1);
