@@ -1,8 +1,7 @@
 /* Name: Samuel Burgess
- *  /* Name: Samuel Burgess
- *       Justin Forgue
- *       Aric Pennington
- *       Elias Phillips
+ *	 	 Justin Forgue
+ *		 Aric Pennington
+ *		 Elias Phillips
  * Date: 11/26/2018
  * Course Number: ECE353
  * Course Name: Computer Systems Lab 3
